@@ -1,0 +1,58 @@
+/*
+	Printer.lts
+	This file includes three types of FSP processes to model the following: 
+	Printer, Student & Technician, and a parallel composite process to model the complete printer system
+
+	Author: Nuwin Godakanda Arachchi
+	W-Id: W1761350
+	IIT-Id: 2019443
+*/
+
+const MINIMUM_PAPER_LEVEL = 0
+const MAXIMUM_PAPER_LEVEL = 3
+const MINIMUM_DOCUMENTS = 1
+range PAPER_TRAY_LIMIT = 0..3
+
+// the system processes
+set PrinterUsers = { technician, student3Docs, student2Docs }
+
+// prohibited actions that shall not be performed or shared with each other
+set StudentProhibitedActions = { acquireLockForRefill, refillBlocked, performRefill }
+set TechnicianProhibitedActions = { acquireLockForPrint }
+
+// printer process
+PRINTER = PRINT_OPERATION[MAXIMUM_PAPER_LEVEL],
+PRINT_OPERATION[paperCount : PAPER_TRAY_LIMIT] = 
+	if (paperCount > MINIMUM_PAPER_LEVEL)
+	then ( // paper is adequet => student can print + refill blocked
+		acquireLockForPrint -> releaseLock -> PRINT_OPERATION[paperCount - 1] | 
+		acquireLockForRefill -> refillBlocked -> releaseLock -> PRINT_OPERATION[paperCount]
+	) else ( // out of paper => no printing allowed + refill performed
+		acquireLockForRefill -> performRefill -> releaseLock -> PRINT_OPERATION[MAXIMUM_PAPER_LEVEL]
+	).
+
+// student process
+STUDENT(DOCUMENTS = MINIMUM_DOCUMENTS) = USE_PRINTER[MINIMUM_DOCUMENTS],
+USE_PRINTER[documentsCount : MINIMUM_DOCUMENTS..DOCUMENTS] = (
+	acquireLockForPrint -> printDocument[documentsCount] -> releaseLock ->
+		if ((documentsCount + 1) <= DOCUMENTS) 
+		then // student has more documents for print => recalls the printer with next document count
+			USE_PRINTER[documentsCount + 1]
+		else // all documents are printer => process terminates
+			(terminate -> END)
+) + StudentProhibitedActions. // technician actions blocked for the student
+
+// technician process
+TECHNICIAN = (
+	acquireLockForRefill -> { performRefill, refillBlocked } -> releaseLock -> TECHNICIAN | terminate -> END
+) + TechnicianProhibitedActions. // student actions blocked for the technician
+
+// printing system paralell processing system
+||PRINTING_SYSTEM = ( 
+	student3Docs: STUDENT(3) || 
+	student2Docs: STUDENT(2) || 
+	technician: TECHNICIAN || 
+	PrinterUsers :: PRINTER 
+) / { terminate / PrinterUsers.terminate }.  // synchronizes the termination with all the printer users
+
+/* END */
